@@ -1,0 +1,8 @@
+# Project information
+group=org.openferal.centuria
+id=centuria-polytool
+name="Centuria PolyTool Tasks"
+version=rolling
+
+# Sub-projects
+# None right now
