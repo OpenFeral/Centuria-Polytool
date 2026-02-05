@@ -1,0 +1,49 @@
+#!/bin/bash
+
+function setupdevenv_define() {
+    # Add to restore
+    addTaskTo restore
+
+    # Relative to caller project
+    runRelativeToCallerProject=true
+}
+
+function setupdevenv_run() {
+    if [ -d "$LOCALPROJECT/skel/devenv" ]; then
+        echo ">> Setting up environment..."
+        devEnvCopy "$LOCALPROJECT/skel/devenv" "$ROOTPROJECT/environment" ""
+        echo ">> Done."
+    fi
+}
+
+function devEnvCopy() {
+    local source="$1"
+    local dest="$2"
+    local prefix=""
+
+    # Check target
+    if [ ! -d "$dest" ]; then
+        echo ">> Created: $prefix$(basename "$dest")"
+        mkdir "$dest"
+    fi
+
+    # Go through folders
+    for dir in "$source"/*/; do
+        if [ -d "$dir" ]; then
+            # Copy
+            devEnvCopy "$dir" "$dest/$(basename "$dir")" "$prefix$(basename "$dir")/"
+        fi 
+    done
+
+    # Go through files
+    for file in "$source"/*; do
+        if [ -f "$file" ]; then
+            # Copy if needed
+            local destFile="$dest/$(basename "$file")"
+            if [ ! -f "$destFile" ]; then
+                echo ">> Created: $prefix$(basename "$file")"
+                cp "$file" "$destFile"
+            fi
+        fi 
+    done
+}
