@@ -1,0 +1,22 @@
+#!/bin/bash
+
+function resetdevenv_define() {
+    # Relative to caller project
+    runRelativeToCallerProject=true
+    beforeTask setupdevenv
+}
+
+function resetdevenv_run() {
+    # Skip local project
+    if [ "$LOCALPROJECTID" == "centuria-polytool" ]; then
+        return
+    fi
+
+    # Load project polyfile
+    loadProject "$LOCALPROJECT" "$LOCALPROJECT" "$(basename "$LOCALPROJECT")" "" false false false
+
+    # Clear
+    echo ">> Resetting environment..."
+    rm -rfv "$BASEPROJECT/environment" | sed "s/^/>>> /g" | sed "s/^>>> >>>/>>>>>/g" | sed "s/^>>> >>/>>>/g" | sed "s/^>>> >/>>>/g"
+    echo ">> Done."
+}
