@@ -4,26 +4,390 @@ function setupdevenv_define() {
     # Add to restore
     addTaskTo restore
 
+    # Check if diff is installed
+    if ! checkInstalled git ; then
+        1>&2 echo "Error: Unable to run setupdevenv! Git is not installed, please make sure to install git and have it available on the PATH."
+        exit 1
+    fi
+    if ! checkInstalled diff ; then
+        1>&2 echo "Error: Unable to run setupdevenv! The command diff is not installed, please make sure to install diff and have it available on the PATH."
+        exit 1
+    fi
+    if ! checkInstalled patch ; then
+        1>&2 echo "Error: Unable to run setupdevenv! The command patch is not installed, please make sure to install patch and have it available on the PATH."
+        exit 1
+    fi
+
     # Relative to caller project
     runRelativeToCallerProject=true
 }
 
 function setupdevenv_run() {
-    if [ -d "$LOCALPROJECT/skel/devenv" ]; then
-        echo ">> Setting up environment..."
-        devEnvCopy "$LOCALPROJECT/skel/devenv" "$ROOTPROJECT/environment" ""
+    # Skip local project
+    if [ "$LOCALPROJECTID" == "centuria-polytool" ]; then
+        return
+    fi
+
+    # Load project polyfile
+    loadProject "$LOCALPROJECT" "$LOCALPROJECT" "$(basename "$LOCALPROJECT")" "" false false false
+
+    # Load
+    reportIndex="$(date +%Y-%m-%d-%H-%M-%S)"
+    devEnvUpgradeNeeded=false
+    devEnvErrorLogged=false
+    devEnvStartedLogged=false
+    local setId="${projectsSetIds["$BASEPROJECTID"]}"
+    eval 'local dependenciesList=("${'"dependencies_$setId"'[@]}")'
+    eval 'subprojectsList=("${'"subprojects_$setId"'[@]}")'
+
+    # Prepare dependency
+    for depId in "${dependenciesList[@]}"; do
+        # Run for dependency
+        runLocalToProject "$depId" devEnvPrepare
+    done
+    
+    # Prepare local
+    runLocalToProject "$BASEPROJECTID" devEnvPrepare
+
+    # Prepare subproject
+    for subProjectId in "${subprojectsList[@]}"; do
+        # Run for sub-project
+        runLocalToProject "$subProjectId" devEnvPrepare
+    done
+
+    # Log
+    if [ "$devEnvStartedLogged" == "true" ]; then 
+        echo ">> Writing environment..."
+    fi
+
+    # Copy for dependencies
+    for depId in "${dependenciesList[@]}"; do
+        # Run for dependency
+        runLocalToProject "$depId" devEnvSetup
+    done
+    
+    # Copy local
+    runLocalToProject "$BASEPROJECTID" devEnvSetup
+
+    # Copy subproject
+    for subProjectId in "${subprojectsList[@]}"; do
+        # Run for sub-project
+        runLocalToProject "$subProjectId" devEnvSetup
+    done
+
+    # Finalize dependency
+    for depId in "${dependenciesList[@]}"; do
+        # Run for dependency
+        runLocalToProject "$depId" devEnvFinish
+    done
+    
+    # Finalize local
+    runLocalToProject "$BASEPROJECTID" devEnvFinish
+
+    # Finalize subproject
+    for subProjectId in "${subprojectsList[@]}"; do
+        # Run for sub-project
+        runLocalToProject "$subProjectId" devEnvFinish
+    done
+
+    # Log
+    if [ "$devEnvStartedLogged" == "true" ]; then 
         echo ">> Done."
     fi
+
+    # Check
+    if [ "$devEnvUpgradeNeeded" == "true" ]; then
+        echo ">> "
+        echo -n ">> "
+        1>&2 echo 'Warning: some environment files could not be updated completely!'
+        echo -n ">> "
+        1>&2 echo 'Warning: Please check the reports folder under "environment/reports/'"$reportIndex"'" for details.'
+        echo -n ">> "
+        1>&2 echo 'Warning: Updates have been applied forcefully, this could have resulted in loss of development settings.'
+        echo -n ">> "
+        1>&2 echo "Warning: "
+        echo -n ">> "
+        1>&2 echo 'Warning: If issues occur, consider runnging "resetdevenv".'
+        return 1
+    fi
+}
+
+function createReport()
+{
+    # Generate report
+
+    # Params
+    local reportdir="$1"
+    local sourcedata="$2" # New
+    local cachedata="$3" # Original
+    local moddata="$4" # Current
+    local status="$5"
+    local error="$6"
+    local splash="$7"
+
+    # Create folder
+    if [ ! -d "$reportdir" ]; then
+        mkdir -p "$reportdir"
+    fi
+
+    # Create report ID
+    local reportid="$(printf "%x\n" $RANDOM$RANDOM$RANDOM)"
+    while [ -d "$reportdir/$reportid" ]; do
+        reportid="$(printf "%x\n" $RANDOM$RANDOM$RANDOM)"
+    done
+    mkdir "$reportdir/$reportid"
+
+    # Generate patch
+    local patchgensuccess=false
+    if [ -f "$moddata" ] && [ -f "$cachedata" ]; then
+        diff -u "$cachedata" "$moddata" >> "$reportdir/$reportid/userchange.patch"
+        patchgensuccess=true
+    fi
+
+    # Generate diff between source files
+    local diffdumpsuccess=false
+    if [ -f "$sourcedata" ] && [ -f "$cachedata" ]; then
+        diff -u "$cachedata" "$sourcedata" >> "$reportdir/$reportid/sourcechange.diff"
+        diffdumpsuccess=true
+    fi
+
+    # Attempt storing update source file
+    local storeupdatesuccess=false
+    if [ -f "$sourcedata" ]; then
+        cp "$sourcedata" "$reportdir/$reportid/newversion.src"
+        storeupdatesuccess=true
+    fi
+
+    # Attempt storing current source file
+    local storesourcesuccess=false
+    if [ -f "$moddata" ]; then
+        cp "$moddata" "$reportdir/$reportid/previousedited.src"
+        storesourcesuccess=true
+    fi
+
+    # Attempt storing original source file
+    local storeoriginalsuccess=false
+    if [ -f "$cachedata" ]; then
+        cp "$cachedata" "$reportdir/$reportid/originalversion.src"
+        storeoriginalsuccess=true
+    fi
+
+    # Generate report
+    echo "$splash" >> "$reportdir/$reportid/report.txt"
+    echo "" >> "$reportdir/$reportid/report.txt"
+    echo "Report ID: $reportid" >> "$reportdir/$reportid/report.txt"
+    if [ "$error" != "" ]; then
+        echo "Error: $error" >> "$reportdir/$reportid/report.txt"
+    fi
+    echo "" >> "$reportdir/$reportid/report.txt"
+    echo "Update source file path: $sourcedata" >> "$reportdir/$reportid/report.txt"
+    echo "Previous source file path: $cachedata" >> "$reportdir/$reportid/report.txt"
+    echo "Local file path: $moddata" >> "$reportdir/$reportid/report.txt"
+    echo "" >> "$reportdir/$reportid/report.txt"
+    if [ "$patchgensuccess" == "true" ]; then
+        echo "A diff-patch has been created of the user changes for comparison in the file userchange.patch" >> "$reportdir/$reportid/report.txt"
+    fi
+    if [ "$diffdumpsuccess" == "true" ]; then
+        echo "The differences between the two versions of the source file have been stored at sourcechange.diff" >> "$reportdir/$reportid/report.txt"
+    fi
+    if [ "$storeupdatesuccess" == "true" ]; then
+        echo "The updated source file has been stored at newversion.src" >> "$reportdir/$reportid/report.txt"
+    fi
+    if [ "$storesourcesuccess" == "true" ]; then
+        echo "The current source file (with user changes) has been stored at previousedited.src" >> "$reportdir/$reportid/report.txt"
+    fi
+    if [ "$storeoriginalsuccess" == "true" ]; then
+        echo "The original source (without user changes) has been stored at originalversion.src" >> "$reportdir/$reportid/report.txt"
+    fi
+    if [ "$patchgensuccess" == "false" ] && [ "$diffdumpsuccess" == "false" ] && [ "$storeupdatesuccess" == "false" ] && [ "$storesourcesuccess" == "false" ] && [ "$storeoriginalsuccess" == "false" ]; then
+        local reportdata="$(cat "$reportdir/$reportid/report.txt")"
+        rm -rf "$reportdir/$reportid/"
+        echo "$reportdata" >> "$reportdir/$reportid.txt"
+    fi
+
+    # Return id
+    echo "$reportid"
+}
+
+function devEnvSetup() {
+    # Check skeleton files
+    if [ -d "$LOCALPROJECT/skel/devenv" ]; then
+        # Copy skeletons
+        if [ "$devEnvStartedLogged" == "false" ]; then
+            echo ">> Setting up environment..."
+            devEnvStartedLogged=true
+        fi
+        devEnvCopy "$LOCALPROJECT/skel/devenv" "$BASEPROJECT/environment" "" ">>> "
+    fi
+}
+
+function devEnvPrepare() {
+    # Check skeleton files
+    if [ -d "$LOCALPROJECT/skel/devenv" ]; then
+        # Create if needed
+        if [ ! -d "$BASEPROJECT/environment/cache" ]; then
+            mkdir -p "$BASEPROJECT/environment/cache"
+        fi
+
+        # Check version
+        if [ -f "$LOCALPROJECT/skel/devenv/skel.version" ]; then
+            # Check version
+            local versioncurrent=""
+            if [ -f "$BASEPROJECT/environment/cache/skeleton.${LOCALPROJECTID,,}.version" ]; then
+                versioncurrent="$(cat "$BASEPROJECT/environment/cache/skeleton.${LOCALPROJECTID,,}.version")"
+            fi
+            local versionnew="$(cat "$LOCALPROJECT/skel/devenv/skel.version")"
+            if [ "$versionnew" != "$versioncurrent" ]; then
+                # Find updated files
+                if [ "$versioncurrent" != "" ]; then
+                    # Log
+                    if [ "$devEnvStartedLogged" == "false" ]; then
+                        echo ">> Setting up environment..."
+                        devEnvStartedLogged=true
+                    fi
+
+                    # Log
+                    echo ">> Skeleton files updated, checking changed files..."
+
+                    # Find changes
+                    local changes=()
+                    findChangedFiles "$LOCALPROJECT/skel/devenv" "$BASEPROJECT/environment/cache/skeleton.${LOCALPROJECTID,,}.original" ""
+                    for changed in "${changes[@]}"; do
+                        # File changed
+                        local original="$BASEPROJECT/environment/cache/skeleton.${LOCALPROJECTID,,}.original/$changed"
+                        local current="$BASEPROJECT/environment/$changed"
+                        local new="$LOCALPROJECT/skel/devenv/$changed"
+
+                        # Log
+                        echo ">>> Updated skeleton file: $changed"
+
+                        # Compare the original against current
+                        if [ -f "$current" ] && git diff --exit-code --ignore-space-at-eol --ignore-cr-at-eol --no-index "$original" "$current" &>/dev/null ; then
+                            # Update now
+                            rm "$current"
+                        elif [ -f "$original" ] && [ -f "$new" ] && ([ ! -f "$current" ] || ! git diff --exit-code --ignore-space-at-eol --ignore-cr-at-eol --no-index "$original" "$current" &>/dev/null); then
+                            # User changes that would be lost
+
+                            # Log
+                            if [ "$devEnvErrorLogged" == "false" ]; then
+                                echo ">> Warnings encountered during upgrade:"
+                                devEnvErrorLogged=true
+                            fi
+
+                            # Get patch
+                            local userpatch="$(cd "$BASEPROJECT/environment/cache/skeleton.${LOCALPROJECTID,,}.original/" ; diff -u "$changed" "$current")"
+                            local changes="$(cd "$BASEPROJECT/environment/cache/skeleton.${LOCALPROJECTID,,}.original/" ; diff -u "$changed" "$new")"
+
+                            # Install
+                            local dir="$(dirname "$BASEPROJECT/environment/cache/patching/$current")"
+                            if [ ! -d "$dir" ]; then
+                                mkdir -p "$dir"
+                            fi
+                            cp "$new" "$BASEPROJECT/environment/cache/patching/$current"
+
+                            # Try re-applying user changes
+                            echo "$userpatch" | patch "$BASEPROJECT/environment/cache/patching/$current" &>/dev/null
+                            local exitcode=$?
+
+                            # Check result
+                            if [ "$exitcode" == 0 ]; then
+                                # Success
+                                local reportId="$(createReport "$BASEPROJECT/environment/reports/$reportIndex" "$new" "$original" "$current" "Success" "" "File contains user changes that could be lost in upgrade, however automatic migration did successfully complete, but unsure if the file is fully intact.")"
+                                echo ">>> Automatically updated file with user changes: $changed: please review report $reportId"
+                            else
+                                # Failed
+                                if [ -f "$current.rej" ]; then
+                                    rm "$current.rej"
+                                fi
+                                if [ -f "$current.orig" ]; then
+                                    rm "$current.orig"
+                                fi
+                                local reportId="$(createReport "$BASEPROJECT/environment/reports/$reportIndex" "$new" "$original" "$current" "Failed" "User changed failed to apply to current version" "File contains user changes that were be lost in upgrade and automatic migration has failed.")"
+                                echo -n ">>> "
+                                1>&2 echo "Could not automatically patch: $changed: please review report $reportId"
+                            fi
+
+                            # Move
+                            cp "$BASEPROJECT/environment/cache/patching/$current" "$current"
+                            rm -rf "$BASEPROJECT/environment/cache/patching"
+                            
+                            # Mark upgrade required
+                            devEnvUpgradeNeeded=true
+                        fi
+
+                        # Remove from memory
+                        if [ -f "$BASEPROJECT/environment/cache/skeleton.${LOCALPROJECTID,,}.original/$changed" ]; then
+                            rm "$BASEPROJECT/environment/cache/skeleton.${LOCALPROJECTID,,}.original/$changed"
+                        fi
+                    done
+                fi
+            fi
+        fi
+    fi
+}
+
+function devEnvFinish() {
+    # Check skeleton files
+    if [ -d "$LOCALPROJECT/skel/devenv" ]; then
+        # Create if needed
+        if [ ! -d "$BASEPROJECT/environment" ]; then
+            mkdir "$BASEPROJECT/environment/"
+        fi
+
+        # Check version
+        if [ -f "$LOCALPROJECT/skel/devenv/skel.version" ]; then            
+            # Check version
+            local versioncurrent=""
+            if [ -f "$BASEPROJECT/environment/cache/skeleton.${LOCALPROJECTID,,}.version" ]; then
+                versioncurrent="$(cat "$BASEPROJECT/environment/cache/skeleton.${LOCALPROJECTID,,}.version")"
+            fi
+            local versionnew="$(cat "$LOCALPROJECT/skel/devenv/skel.version")"
+            if [ "$versionnew" != "$versioncurrent" ]; then
+                # Update version
+                cp -f "$LOCALPROJECT/skel/devenv/skel.version" "$BASEPROJECT/environment/cache/skeleton.${LOCALPROJECTID,,}.version"
+                echo ">> Saving original skeletons..."
+                devEnvCopy "$LOCALPROJECT/skel/devenv" "$BASEPROJECT/environment/cache/skeleton.${LOCALPROJECTID,,}.original" "" ">>> "
+            fi
+        fi
+    fi
+}
+
+function findChangedFiles() {
+    local source="$1"
+    local dest="$2"
+    local prefix="$3"
+
+    # Go through folders
+    for dir in "$source"/*/; do
+        if [ -d "$dir" ]; then
+            findChangedFiles "$dir" "$dest/$(basename "$dir")" "$prefix$(basename "$dir")/"
+        fi 
+    done
+
+    # Go through files
+    for file in "$source"/*; do
+        if [ -f "$file" ]; then
+            if [ "$(basename "$file")" != "skel.version" ] || [ "$prefix" != "" ]; then
+                local origFile="$dest/$(basename "$file")"
+                local newFile="$file"
+
+                # Compare
+                if [ ! -f "$origFile" ] || ! git diff --exit-code --ignore-space-at-eol --ignore-cr-at-eol --no-index "$origFile" "$newFile" &>/dev/null; then
+                    changes+=("$prefix$(basename "$file")")
+                fi
+            fi
+        fi 
+    done
 }
 
 function devEnvCopy() {
     local source="$1"
     local dest="$2"
-    local prefix=""
+    local prefix="$3"
+    local logpref="$4"
 
     # Check target
     if [ ! -d "$dest" ]; then
-        echo ">> Created: $prefix$(basename "$dest")"
         mkdir "$dest"
     fi
 
@@ -31,18 +395,23 @@ function devEnvCopy() {
     for dir in "$source"/*/; do
         if [ -d "$dir" ]; then
             # Copy
-            devEnvCopy "$dir" "$dest/$(basename "$dir")" "$prefix$(basename "$dir")/"
-        fi 
+            if [ ! -d "$dest/$(basename "$dir")" ]; then
+                echo "${logpref}Created: $prefix$(basename "$dir")"
+            fi
+            devEnvCopy "$dir" "$dest/$(basename "$dir")" "$prefix$(basename "$dir")/" "$logpref"
+        fi
     done
 
     # Go through files
     for file in "$source"/*; do
         if [ -f "$file" ]; then
-            # Copy if needed
-            local destFile="$dest/$(basename "$file")"
-            if [ ! -f "$destFile" ]; then
-                echo ">> Created: $prefix$(basename "$file")"
-                cp "$file" "$destFile"
+            if [ "$(basename "$file")" != "skel.version" ] || [ "$prefix" != "" ]; then
+                # Copy if needed
+                local destFile="$dest/$(basename "$file")"
+                if [ ! -f "$destFile" ]; then
+                    echo "${logpref}Created: $prefix$(basename "$file")"
+                    cp "$file" "$destFile"
+                fi
             fi
         fi 
     done
