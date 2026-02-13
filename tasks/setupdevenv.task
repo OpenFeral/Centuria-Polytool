@@ -40,15 +40,15 @@ function setupdevenv_run() {
     eval 'local dependenciesList=("${'"dependencies_$setId"'[@]}")'
     eval 'subprojectsList=("${'"subprojects_$setId"'[@]}")'
 
+    # Prepare local
+    runLocalToProject "$BASEPROJECTID" devEnvPrepare
+
     # Prepare dependency
     for depId in "${dependenciesList[@]}"; do
         # Run for dependency
         runLocalToProject "$depId" devEnvPrepare
     done
     
-    # Prepare local
-    runLocalToProject "$BASEPROJECTID" devEnvPrepare
-
     # Prepare subproject
     for subProjectId in "${subprojectsList[@]}"; do
         # Run for sub-project
@@ -60,20 +60,23 @@ function setupdevenv_run() {
         echo ">> Writing environment..."
     fi
 
+    # Copy local
+    runLocalToProject "$BASEPROJECTID" devEnvSetup
+
     # Copy for dependencies
     for depId in "${dependenciesList[@]}"; do
         # Run for dependency
         runLocalToProject "$depId" devEnvSetup
     done
     
-    # Copy local
-    runLocalToProject "$BASEPROJECTID" devEnvSetup
-
     # Copy subproject
     for subProjectId in "${subprojectsList[@]}"; do
         # Run for sub-project
         runLocalToProject "$subProjectId" devEnvSetup
     done
+
+    # Finalize local
+    runLocalToProject "$BASEPROJECTID" devEnvFinish
 
     # Finalize dependency
     for depId in "${dependenciesList[@]}"; do
@@ -81,9 +84,6 @@ function setupdevenv_run() {
         runLocalToProject "$depId" devEnvFinish
     done
     
-    # Finalize local
-    runLocalToProject "$BASEPROJECTID" devEnvFinish
-
     # Finalize subproject
     for subProjectId in "${subprojectsList[@]}"; do
         # Run for sub-project
