@@ -1,0 +1,12 @@
+#!/bin/bash
+
+function testtask_define() {
+    runRelativeToCallerProject=true
+    requireTask genbuildinfo
+    afterTask genbuildinfo
+}
+
+function testtask_run() {
+    echo $LOCALPROJECTID
+    echo ${PROPERTIES["TESTPROP"]}
+}
