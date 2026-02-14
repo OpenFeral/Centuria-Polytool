@@ -7,6 +7,12 @@
 
 function setup() {
     # Set up
+    LOCALPROJECT="$(readlink -f "$PWD")"
+    BASEPROJECT="$(readlink -f "$PWD")"
+    ROOTPROJECT="$(readlink -f "$PWD")"
+    BUILDDIR="$(readlink -f "$PWD")/build"
+    BASEBUILDDIR="$(readlink -f "$PWD")/build"
+    ROOTBUILDDIR="$(readlink -f "$PWD")/build"
     declare -Ag GLOBALPROPERTIES=()
     declare -Ag LOCALPROPERTIES=()
     preparePolyFileEnvironment
