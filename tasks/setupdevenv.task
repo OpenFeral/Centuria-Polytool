@@ -41,18 +41,18 @@ function setupdevenv_run() {
     eval 'subprojectsList=("${'"subprojects_$setId"'[@]}")'
 
     # Prepare local
-    runLocalToProject "$BASEPROJECTID" devEnvPrepare
+    runLocalToProject "$BASEPROJECTID" devEnvPrepare "$BASEPROJECT/skel/devenv"
 
     # Prepare dependency
     for depId in "${dependenciesList[@]}"; do
         # Run for dependency
-        runLocalToProject "$depId" devEnvPrepare
+        runLocalToProject "$depId" devEnvPrepare "$BASEPROJECT/skel/devenv"
     done
     
     # Prepare subproject
     for subProjectId in "${subprojectsList[@]}"; do
         # Run for sub-project
-        runLocalToProject "$subProjectId" devEnvPrepare
+        runLocalToProject "$subProjectId" devEnvPrepare "$BASEPROJECT/skel/devenv"
     done
 
     # Log
@@ -76,18 +76,18 @@ function setupdevenv_run() {
     done
 
     # Finalize local
-    runLocalToProject "$BASEPROJECTID" devEnvFinish
+    runLocalToProject "$BASEPROJECTID" devEnvFinish "$BASEPROJECT/skel/devenv"
 
     # Finalize dependency
     for depId in "${dependenciesList[@]}"; do
         # Run for dependency
-        runLocalToProject "$depId" devEnvFinish
+        runLocalToProject "$depId" devEnvFinish "$BASEPROJECT/skel/devenv"
     done
     
     # Finalize subproject
     for subProjectId in "${subprojectsList[@]}"; do
         # Run for sub-project
-        runLocalToProject "$subProjectId" devEnvFinish
+        runLocalToProject "$subProjectId" devEnvFinish "$BASEPROJECT/skel/devenv"
     done
 
     # Log
@@ -217,11 +217,13 @@ function devEnvSetup() {
             echo ">> Setting up environment..."
             devEnvStartedLogged=true
         fi
-        devEnvCopy "$LOCALPROJECT/skel/devenv" "$BASEPROJECT/environment" "" ">>> "
+        devEnvCopy "$LOCALPROJECT/skel/devenv" "$BASEPROJECT/environment" "" ">>> " "$LOCALPROJECT/environment/cache/skeleton.user.last"
     fi
 }
 
 function devEnvPrepare() {
+    local localFilesPath="$1"
+
     # Check skeleton files
     if [ -d "$LOCALPROJECT/skel/devenv" ]; then
         # Create if needed
@@ -251,10 +253,11 @@ function devEnvPrepare() {
 
                     # Find changes
                     local changes=()
-                    findChangedFiles "$LOCALPROJECT/skel/devenv" "$BASEPROJECT/environment/cache/skeleton.${LOCALPROJECTID,,}.original" ""
+                    findChangedFiles "$LOCALPROJECT/skel/devenv" "$BASEPROJECT/environment/cache/skeleton.${LOCALPROJECTID,,}.original" "" "$localFilesPath" "$LOCALPROJECT/skel/devenv"
                     for changed in "${changes[@]}"; do
                         # File changed
                         local original="$BASEPROJECT/environment/cache/skeleton.${LOCALPROJECTID,,}.original/$changed"
+                        local userlast="$LOCALPROJECT/environment/cache/skeleton.user.last/$changed"
                         local current="$BASEPROJECT/environment/$changed"
                         local new="$LOCALPROJECT/skel/devenv/$changed"
 
@@ -268,51 +271,146 @@ function devEnvPrepare() {
                         elif [ -f "$original" ] && [ -f "$new" ] && ([ ! -f "$current" ] || ! git diff --exit-code --ignore-space-at-eol --ignore-cr-at-eol --no-index "$original" "$current" &>/dev/null); then
                             # User changes that would be lost
 
-                            # Log
-                            if [ "$devEnvErrorLogged" == "false" ]; then
-                                echo ">> Warnings encountered during upgrade:"
-                                devEnvErrorLogged=true
+                            # Check local
+                            local continue=true
+                            if [ "$localFilesPath" != "$LOCALPROJECT/skel/devenv" ]; then
+                                # In a depedency
+                                # Check if local project contains the skel
+                                if [ -f "$localFilesPath/$changed" ]; then
+                                    # Skip
+                                    continue=false
+                                fi                                
                             fi
-
-                            # Get patch
-                            local userpatch="$(cd "$BASEPROJECT/environment/cache/skeleton.${LOCALPROJECTID,,}.original/" ; diff -u "$changed" "$current")"
-                            local changes="$(cd "$BASEPROJECT/environment/cache/skeleton.${LOCALPROJECTID,,}.original/" ; diff -u "$changed" "$new")"
-
-                            # Install
-                            local dir="$(dirname "$BASEPROJECT/environment/cache/patching/$current")"
-                            if [ ! -d "$dir" ]; then
-                                mkdir -p "$dir"
-                            fi
-                            cp "$new" "$BASEPROJECT/environment/cache/patching/$current"
-
-                            # Try re-applying user changes
-                            echo "$userpatch" | patch "$BASEPROJECT/environment/cache/patching/$current" &>/dev/null
-                            local exitcode=$?
-
-                            # Check result
-                            if [ "$exitcode" == 0 ]; then
-                                # Success
-                                local reportId="$(createReport "$BASEPROJECT/environment/reports/$reportIndex" "$new" "$original" "$current" "Success" "" "File contains user changes that could be lost in upgrade, however automatic migration did successfully complete, but unsure if the file is fully intact.")"
-                                echo ">>> Automatically updated file with user changes: $changed: please review report $reportId"
-                            else
-                                # Failed
-                                if [ -f "$current.rej" ]; then
-                                    rm "$current.rej"
+                            if [ "$continue" != "false" ]; then
+                                # Log
+                                if [ "$devEnvErrorLogged" == "false" ]; then
+                                    echo ">> Warnings encountered during upgrade:"
+                                    devEnvErrorLogged=true
                                 fi
-                                if [ -f "$current.orig" ]; then
-                                    rm "$current.orig"
-                                fi
-                                local reportId="$(createReport "$BASEPROJECT/environment/reports/$reportIndex" "$new" "$original" "$current" "Failed" "User changed failed to apply to current version" "File contains user changes that were be lost in upgrade and automatic migration has failed.")"
-                                echo -n ">>> "
-                                1>&2 echo "Could not automatically patch: $changed: please review report $reportId"
-                            fi
 
-                            # Move
-                            cp "$BASEPROJECT/environment/cache/patching/$current" "$current"
-                            rm -rf "$BASEPROJECT/environment/cache/patching"
-                            
-                            # Mark upgrade required
-                            devEnvUpgradeNeeded=true
+                                # Get patch
+                                local userpatch="$(cd "$BASEPROJECT/environment/cache/skeleton.${LOCALPROJECTID,,}.original/" ; diff -u "$changed" "$current")"
+                                local changes="$(cd "$BASEPROJECT/environment/cache/skeleton.${LOCALPROJECTID,,}.original/" ; diff -u "$changed" "$new")"
+
+                                # Install
+                                local dir="$(dirname "$BASEPROJECT/environment/cache/patching/$current")"
+                                if [ ! -d "$dir" ]; then
+                                    mkdir -p "$dir"
+                                fi
+                                cp "-f $new" "$BASEPROJECT/environment/cache/patching/$current"
+
+                                # Try re-applying user changes
+                                echo "$userpatch" | patch "$BASEPROJECT/environment/cache/patching/$current" &>/dev/null
+                                local exitcode=$?
+
+                                # Check result
+                                if [ "$exitcode" == 0 ]; then
+                                    # Success
+                                    local reportId="$(createReport "$BASEPROJECT/environment/reports/$reportIndex" "$new" "$original" "$current" "Success" "" "File contains user changes that could be lost in upgrade, however automatic migration did successfully complete, but unsure if the file is fully intact.")"
+                                    echo ">>> Automatically updated file with user changes: $changed: please review report $reportId"
+                                else
+                                    # Failed
+                                    if [ -f "$current.rej" ]; then
+                                        rm "$current.rej"
+                                    fi
+                                    if [ -f "$current.orig" ]; then
+                                        rm "$current.orig"
+                                    fi
+                                    local reportId="$(createReport "$BASEPROJECT/environment/reports/$reportIndex" "$new" "$original" "$current" "Failed" "User changed failed to apply to current version" "File contains user changes that were be lost in upgrade and automatic migration has failed.")"
+                                    echo -n ">>> "
+                                    1>&2 echo "Could not automatically patch: $changed: please review report $reportId"
+                                fi
+
+                                # Move
+                                cp -f "$BASEPROJECT/environment/cache/patching/$current" "$current"
+                                rm -rf "$BASEPROJECT/environment/cache/patching"
+                                
+                                # Create user memory file
+                                local dir2="$(dirname "$userlast")"
+                                if [ ! -d "$dir2" ]; then
+                                    mkdir -p "$dir2"
+                                fi
+                                cp -f "$current" "$userlast"
+
+                                # Mark upgrade required
+                                devEnvUpgradeNeeded=true
+                            fi
+                        elif [ ! -f "$original" ] && [ -f "$new" ] && [ -f "$current" ] && [ -f "$userlast" ]; then
+                            # New skeleton file
+                            # However one already exists on the user side
+                            # And we have access to the previous revision
+                            # So lets check against that one
+                            if [ -f "$current" ] && git diff --exit-code --ignore-space-at-eol --ignore-cr-at-eol --no-index "$userlast" "$current" &>/dev/null ; then
+                                # Update now
+                                rm "$current"
+                            elif [ -f "$userlast" ] && [ -f "$new" ] && ([ ! -f "$current" ] || ! git diff --exit-code --ignore-space-at-eol --ignore-cr-at-eol --no-index "$userlast" "$current" &>/dev/null); then
+                                # User changes that would be lost
+
+                                # Check local
+                                local continue=true
+                                if [ "$localFilesPath" != "$LOCALPROJECT/skel/devenv" ]; then
+                                    # In a depedency
+                                    # Check if local project contains the skel
+                                    if [ -f "$localFilesPath/$changed" ]; then
+                                        # Skip
+                                        continue=false
+                                    fi                                
+                                fi
+                                if [ "$continue" != "false" ]; then
+                                    # Log
+                                    if [ "$devEnvErrorLogged" == "false" ]; then
+                                        echo ">> Warnings encountered during upgrade:"
+                                        devEnvErrorLogged=true
+                                    fi
+
+                                    # Get patch
+                                    local userpatch="$(cd "$BASEPROJECT/environment/cache/skeleton.user.last/" ; diff -u "$changed" "$current")"
+                                    local changes="$(cd "$BASEPROJECT/environment/cache/skeleton.user.last/" ; diff -u "$changed" "$new")"
+
+                                    # Install
+                                    local dir="$(dirname "$BASEPROJECT/environment/cache/patching/$current")"
+                                    if [ ! -d "$dir" ]; then
+                                        mkdir -p "$dir"
+                                    fi
+                                    cp "$new" "$BASEPROJECT/environment/cache/patching/$current"
+
+                                    # Try re-applying user changes
+                                    echo "$userpatch" | patch "$BASEPROJECT/environment/cache/patching/$current" &>/dev/null
+                                    local exitcode=$?
+
+                                    # Check result
+                                    if [ "$exitcode" == 0 ]; then
+                                        # Success
+                                        local reportId="$(createReport "$BASEPROJECT/environment/reports/$reportIndex" "$new" "$userlast" "$current" "Success" "" "File contains user changes that could be lost in upgrade, however automatic migration did successfully complete, but unsure if the file is fully intact.")"
+                                        echo ">>> Automatically updated file with user changes: $changed: please review report $reportId"
+                                    else
+                                        # Failed
+                                        if [ -f "$current.rej" ]; then
+                                            rm "$current.rej"
+                                        fi
+                                        if [ -f "$current.orig" ]; then
+                                            rm "$current.orig"
+                                        fi
+                                        local reportId="$(createReport "$BASEPROJECT/environment/reports/$reportIndex" "$new" "$userlast" "$current" "Failed" "User changed failed to apply to current version" "File contains user changes that were be lost in upgrade and automatic migration has failed.")"
+                                        echo -n ">>> "
+                                        1>&2 echo "Could not automatically patch: $changed: please review report $reportId"
+                                    fi
+
+                                    # Move
+                                    cp -f "$BASEPROJECT/environment/cache/patching/$current" "$current"
+                                    rm -rf "$BASEPROJECT/environment/cache/patching"
+
+                                    # Create user memory file
+                                    local dir2="$(dirname "$userlast")"
+                                    if [ ! -d "$dir2" ]; then
+                                        mkdir -p "$dir2"
+                                    fi
+                                    cp -f "$current" "$userlast"
+
+                                    # Mark upgrade required
+                                    devEnvUpgradeNeeded=true
+                                fi
+                            fi
                         fi
 
                         # Remove from memory
@@ -327,6 +425,8 @@ function devEnvPrepare() {
 }
 
 function devEnvFinish() {
+    local localFilesPath="$1"
+
     # Check skeleton files
     if [ -d "$LOCALPROJECT/skel/devenv" ]; then
         # Create if needed
@@ -346,7 +446,7 @@ function devEnvFinish() {
                 # Update version
                 cp -f "$LOCALPROJECT/skel/devenv/skel.version" "$BASEPROJECT/environment/cache/skeleton.${LOCALPROJECTID,,}.version"
                 echo ">> Saving original skeletons..."
-                devEnvCopy "$LOCALPROJECT/skel/devenv" "$BASEPROJECT/environment/cache/skeleton.${LOCALPROJECTID,,}.original" "" ">>> "
+                devEnvCopy "$LOCALPROJECT/skel/devenv" "$BASEPROJECT/environment/cache/skeleton.${LOCALPROJECTID,,}.original" "" ">>> " ""
             fi
         fi
     fi
@@ -356,11 +456,13 @@ function findChangedFiles() {
     local source="$1"
     local dest="$2"
     local prefix="$3"
+    local localFilesPath="$4"
+    local currentFilesPath="$5"
 
     # Go through folders
     for dir in "$source"/*/; do
         if [ -d "$dir" ]; then
-            findChangedFiles "$dir" "$dest/$(basename "$dir")" "$prefix$(basename "$dir")/"
+            findChangedFiles "$dir" "$dest/$(basename "$dir")" "$prefix$(basename "$dir")/" "$localFilesPath" "$currentFilesPath"
         fi 
     done
 
@@ -385,6 +487,7 @@ function devEnvCopy() {
     local dest="$2"
     local prefix="$3"
     local logpref="$4"
+    local usercacheout="$5"
 
     # Check target
     if [ ! -d "$dest" ]; then
@@ -398,7 +501,11 @@ function devEnvCopy() {
             if [ ! -d "$dest/$(basename "$dir")" ]; then
                 echo "${logpref}Created: $prefix$(basename "$dir")"
             fi
-            devEnvCopy "$dir" "$dest/$(basename "$dir")" "$prefix$(basename "$dir")/" "$logpref"
+            local usercacheoutnew=""
+            if [ "$usercacheout" != "" ]; then
+                usercacheoutnew="$usercacheout/$(basename "$dir")"
+            fi
+            devEnvCopy "$dir" "$dest/$(basename "$dir")" "$prefix$(basename "$dir")/" "$logpref" "$usercacheoutnew"
         fi
     done
 
@@ -411,6 +518,13 @@ function devEnvCopy() {
                 if [ ! -f "$destFile" ]; then
                     echo "${logpref}Created: $prefix$(basename "$file")"
                     cp "$file" "$destFile"
+                    if [ "$usercacheout" != "" ]; then
+                        local dir="$(dirname "$usercacheout/$(basename "$file")")"
+                        if [ ! -d "$dir" ]; then
+                            mkdir -p "$dir"
+                        fi
+                        cp "$file" "$usercacheout/$(basename "$file")"
+                    fi
                 fi
             fi
         fi 
