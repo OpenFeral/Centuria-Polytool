@@ -3,7 +3,9 @@
     // Mostly just loaded as strings
     "name": "{polyfile.name}",
     "version": "{polyfile.version}",
-    "version_title": "{polypak.build.current.versiontitle}",
+
+    // Version info
+    "build_version": "{build.version}",
 
     // Commit information
     "commit_id": "{git.currentcommit.id}",
@@ -15,18 +17,16 @@
     "branch_url": "{devenv.urls.branch_base}/{git.branch}",
 
     // All commits
-    "commit_names": "{polypak.build.current.commits.names}",
-    "commit_urls": "{polypak.build.current.commits.urls}",
-
-    // Patch properties
-    // These are special cases, if a string is an exact variable it is loaded as a json object instead of a string
     //
-    // The variable polypak.build.current.patchnames is a json object of PR names included in the build, and their commit IDs
-    // The variable polypak.build.current.patchurls is a json object of PR names and the URLs of each PR
-    "included_patch_names": "{polypak.build.current.patchnames}",
-    "included_patch_urls": "{polypak.build.current.patchurls}",
+    // The variable build.commits.names is a json object of all commit messages by their commit ID
+    // The variable build.commits.urls is a json object of commit urls by their commit ID
+    "included_commit_names": "{build.commits.messages}",
+    "included_commit_urls": "{build.commits.urls}",
 
-    // Changelog files
-    "raw_changelog_link": "{devenv.urls.repopage.viewfile.raw}/changelogs/{polyfile.version}.md",
-    "changelog_link": "{devenv.urls.repopage.viewfile}/changelogs/{polyfile.version}.md"
+    // Included patches
+    //
+    // The variable build.patches.names is a json object of PR names included in the build, and their commit IDs
+    // The variable build.patches.urls is a json object of PR names and the URLs of each PR
+    "included_patch_names": "{build.patches.names}",
+    "included_patch_urls": "{build.patches.urls}"
 }
